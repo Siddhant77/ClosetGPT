@@ -22,7 +22,7 @@ rm checkpoints.zip
 ```
 ## Demo
 
-Download the compatibility model, the complementry model and the precomputed embeddings from the shared google drive [link] (https://drive.google.com/drive/folders/19xzBp3dP33lMWMaNYkKFgpePmPBjb6jm?usp=share_link). Download the folders to ./closetGPT
+Download the compatibility model, the complementry model and the precomputed embeddings from the shared google drive [link](https://drive.google.com/drive/folders/19xzBp3dP33lMWMaNYkKFgpePmPBjb6jm?usp=share_link). Download the folders to ./closetGPT
 
 Follow the steps below to run the demo:
 
