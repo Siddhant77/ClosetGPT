@@ -13,6 +13,10 @@ from typing import Dict, List
 from src.data.datatypes import FashionItem, FashionCompatibilityQuery
 from itertools import product
 from src.data.datasets.polyvore import load_metadata, load_item
+from src.data.datatypes import Outfit
+
+import os
+import pandas as pd
 
 # Add the absolute import for loading the model
 from src.models.load import load_model
@@ -96,57 +100,58 @@ def generate_outfit_combinations_and_scores(categorized_data: Dict[str, List[Fas
     limited_combinations = all_combinations[:max_combinations]
     print(f"Generated {len(limited_combinations)} top+bottom outfit combinations.")
     
-    scores = []
-    
+    outfits = []
     # For each combination of items, compute the compatibility score
     for combination in limited_combinations:
         score = compute_compatibility_score(list(combination), model)
-        scores.append({
-            'outfit': combination,
-            'score': score
-        })
-        
+        outfits.append(Outfit(items=combination, score=score))        
         # Force garbage collection periodically
-        if len(scores) % 10 == 0:
+        if len(outfits) % 10 == 0:
             gc.collect()
+    print(".")
     
-    return scores
+    return outfits
 
 
 if __name__ == '__main__':
-    dataset_dir = '/Users/atharva/Documents/TAMU/Spring 2025/Information Search Retreival CSCE670/ClosetGpt/outfit-transformer/datasets/polyvore'  #replace with path to polyvore dataset
+
+    print("SRC DIR =", SRC_DIR)
+    print("pwd", os.getcwd())
     
+    polyvore_dir = SRC_DIR + '/datasets/polyvore'
+    model_path = SRC_DIR +  '/compatibility_model/compatibillity_clip_best.pth'
+    json_path = SRC_DIR + '/datasets/outfits.json'
     # Load the model
-    model = load_model(model_type='clip', checkpoint='/Users/atharva/Documents/TAMU/Spring 2025/Information Search Retreival CSCE670/ClosetGpt/outfit-transformer/checkpoints/compatibillity_clip_best.pth') #replace with path to model checkpoint
+    model = load_model(model_type='clip', checkpoint=model_path)
     model.eval()
 
     # Process with reasonable limits
-    max_items_per_category = 300  # Load up to 30 items per category
-    max_combinations = 2000       # Limit combinations to test (900 possible with 30x30)
+    max_items_per_category = 20  # Load up to 30 items per category
+    max_combinations = 20      # Limit combinations to test (900 possible with 30x30)
     
     # Organize and load the dataset with limits (tops and bottoms only)
     categorized_data = organize_and_load_data(
-        dataset_dir, 
+        polyvore_dir, 
         load_image=True,
         max_items_per_category=max_items_per_category
     )
     
     # Generate top+bottom combinations and compute scores
-    outfit_scores = generate_outfit_combinations_and_scores(
+    outfits = generate_outfit_combinations_and_scores(
         categorized_data, 
         model,
         max_combinations=max_combinations
     )
     
     # Sort by score from highest to lowest
-    outfit_scores.sort(key=lambda x: x['score'], reverse=True)
+    outfits.sort(key=lambda x: x.score, reverse=True)
     
     # Print out the scores for the outfits with detailed item information
-    for i, outfit_data in enumerate(outfit_scores):
-        print(f"\n===== Outfit {i+1} (Score: {outfit_data['score']:.4f}) =====")
+    for i, outfit in enumerate(outfits):
+        print(f"\n===== Outfit {i+1} (Score: {outfit.score:.4f}) =====")
         
         # Print details for each item in the outfit
-        for j, item in enumerate(outfit_data['outfit']):
+        for j, item in enumerate(outfit.fashion_items):
             category = item.category.upper() if item.category else "UNKNOWN"
             description = item.description if item.description else "No description"
             print(f"  {j+1}. [{category}] {description}")
@@ -157,3 +162,12 @@ if __name__ == '__main__':
         # Only show top 20 outfits
         if i >= 19:
             break
+    
+    # Save outfits to a json obj to easy display
+    print(f"Saving generated outfits to a json obj in {json_path}")
+
+    outfit_dicts = [outfit.to_dict() for outfit in outfits]
+    df = pd.DataFrame(outfit_dicts)
+
+    # Save to JSON
+    df.to_json(json_path, orient='records')

@@ -7,13 +7,19 @@ import torch
 import random
 from argparse import ArgumentParser
 import pathlib
+import json
 
 from .vectorstore import FAISSVectorStore
 from ..models.load import load_model
 from ..data import datatypes
 from ..data.datasets import polyvore
+from ..data.datatypes import Outfit
+
+import random
 
 SRC_DIR = pathlib.Path(__file__).parent.parent.parent.absolute()
+OUTFITS_PATH = SRC_DIR / 'datasets' / 'outfits.json'
+
 LOGS_DIR = SRC_DIR / 'logs'
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -77,6 +83,20 @@ def run(args):
 
     with gr.Blocks() as demo:
         state_selected_my_item_index = gr.State(value=None)
+
+        with gr.Row(equal_height=True):
+            with gr.Column(scale=8):
+                loaded_outfit_gallery = gr.Gallery(
+                    label="Outfit Items",
+                    allow_preview=False,
+                    columns=[4],
+                    type="pil"
+                )
+            with gr.Column(scale=4):
+                loaded_outfit_id = gr.Textbox(label="Outfit ID", interactive=False)
+                loaded_description = gr.Textbox(label="Description", interactive=False)
+                loaded_score = gr.Textbox(label="Score", interactive=False)
+                btn_load_outfits = gr.Button("Load Outfits")
         
         with gr.Row(equal_height=True):
             gr.Markdown(
@@ -233,6 +253,29 @@ def run(args):
                 item_category: None,
             }
         
+        def load_outfits_json():
+            try:
+                with open(OUTFITS_PATH, "r") as f:
+                    data = json.load(f)
+                random_number = random.randint(0, 19)
+                outfit = Outfit.from_dict(data[random_number])  # show first outfit
+                images = [item.image for item in outfit.fashion_items if item.image]
+
+                return {
+                    loaded_outfit_gallery: images,
+                    loaded_outfit_id: outfit.outfit_id,
+                    loaded_description: outfit.description,
+                    loaded_score: f"{outfit.score:.2f}"
+                }
+            except Exception as e:
+                gr.Warning(f"Failed to load outfits: {str(e)}")
+                return {
+                    loaded_outfit_gallery: [],
+                    loaded_outfit_id: "",
+                    loaded_description: "",
+                    loaded_score: ""
+                }
+
         def select_page_from_polyvore(page):
             global state_candidate_items
             
@@ -337,7 +380,12 @@ def run(args):
             inputs=None,
             outputs=[searched_item_gallery]
         )
-    
+        btn_load_outfits.click(
+            load_outfits_json,
+            inputs=[],
+            outputs=[loaded_outfit_gallery, loaded_outfit_id, loaded_description, loaded_score]
+        )
+
     # Launch
     demo.launch()
     
