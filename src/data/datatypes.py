@@ -33,6 +33,9 @@ class FashionItem(BaseModel):
         description="Embedding of the item"
     )
 
+    class Config:
+        arbitrary_types_allowed = True
+
     def to_dict(self):
 
         data = {
@@ -80,16 +83,36 @@ class FashionItem(BaseModel):
             embedding=embedding
         )
 
+
+class Outfit(BaseModel):
+    outfit_id: str = Field(
+        default=None, 
+        description="Unique identifier for the outfit")
+    description: str = Field(
+        default="", 
+        description="Description or name of the outfit")
+    score: float = Field(
+        default=None, 
+        description="A score or rating associated with the outfit")
+    fashion_items: List[FashionItem] = Field(
+        default_factory=list, 
+        description="List of fashion items in the outfit")
+    embedding: Optional[np.ndarray] = Field(
+        default=None,
+        description="Embedding of the item"
+    )
+
     class Config:
         arbitrary_types_allowed = True
 
-class Outfit(BaseModel):
-    outfit_id: str = Field(default=None, description="Unique identifier for the outfit")
-    description: str = Field(default="", description="Description or name of the outfit")
-    score: float = Field(default=None, description="A score or rating associated with the outfit")
-    fashion_items: List[FashionItem] = Field(default_factory=list, description="List of fashion items in the outfit")
-
-    def __init__(self, fashion_items: List[FashionItem], score: float = None, outfit_id: str = None, description: str = None):
+    def __init__(
+            self, 
+            fashion_items: List[FashionItem], 
+            score: float = None, 
+            outfit_id: str = None, 
+            description: str = None,
+            embedding: np.ndarray = None
+            ):
         # Generate outfit_id by joining item_ids
         if not outfit_id:
             item_ids = [str(item.item_id) for item in fashion_items if item.item_id is not None]
@@ -104,7 +127,8 @@ class Outfit(BaseModel):
             outfit_id=outfit_id,
             description=description,
             score=score,
-            fashion_items=fashion_items
+            fashion_items=fashion_items,
+            embedding=embedding
         )
 
     def to_dict(self):
@@ -112,7 +136,9 @@ class Outfit(BaseModel):
             "outfit_id": self.outfit_id,
             "description": self.description,
             "score": self.score,
-            "fashion_items": [item.to_dict() for item in self.fashion_items]
+            "fashion_items": [item.to_dict() for item in self.fashion_items],
+            "embedding" : self.embedding.tolist() if self.embedding is not None else None
+
         }
 
     @classmethod
@@ -121,7 +147,8 @@ class Outfit(BaseModel):
             outfit_id=data.get("outfit_id"),
             description=data.get("description", ""),
             score=data.get("score"),
-            fashion_items=[FashionItem.from_dict(d) for d in data.get("fashion_items", [])]
+            fashion_items=[FashionItem.from_dict(d) for d in data.get("fashion_items", [])],
+            embedding=np.array(data["embedding"]) if data.get("embedding") is not None else None
         )
 
     

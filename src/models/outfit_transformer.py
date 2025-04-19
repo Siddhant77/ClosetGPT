@@ -181,6 +181,41 @@ class OutfitTransformer(nn.Module):
         
         return scores
     
+    def predict_score_embeddings(
+        self, 
+        query: List[FashionCompatibilityQuery], 
+        use_precomputed_embedding: bool = True
+    ) -> Tuple[Tensor, Tensor]:
+        outfits = [query_.outfit for query_ in query]
+
+
+
+        if use_precomputed_embedding:
+            assert all([item_.embedding is not None for item_ in sum(outfits, [])])
+            embs_of_inputs = [[item_.embedding for item_ in outfit] for outfit in outfits]
+            embs_of_inputs, mask = self._pad_and_mask_for_embs(embs_of_inputs)
+        else:
+            images, texts, mask = self._pad_and_mask_for_outfits(outfits)
+            embs_of_inputs = self.item_enc(images, texts)
+
+        task_emb = torch.cat([self.task_emb, self.predict_emb], dim=-1)
+
+        embs_of_inputs = torch.cat([
+            task_emb.view(1, 1, -1).expand(len(query), -1, -1),  # [B, 1, D]
+            embs_of_inputs  # [B, L, D]
+        ], dim=1)  # [B, L+1, D]
+
+        mask = torch.cat([
+            torch.zeros(len(query), 1, dtype=torch.bool, device=self.device),  # [B, 1]
+            mask  # [B, L]
+        ], dim=1)  # [B, L+1]
+
+        last_hidden_states = self._style_enc_forward(embs_of_inputs, src_key_padding_mask=mask)
+        scores = self.predict_ffn(last_hidden_states[:, 0, :])
+ 
+        return scores, embs_of_inputs
+
+    
     def embed_query(self, query: List[FashionComplementaryQuery], use_precomputed_embedding: bool=False) -> Tensor:
         # q_items = [[FashionItem(category=i.category, image=self.image_query, description=i.category)] for i in query]
         outfits = [query_.outfit for query_ in query]
