@@ -120,7 +120,7 @@ class Outfit(BaseModel):
 
         # Generate description from item categories or names
         if not description:
-            description = ", ".join([item.category + ":" + item.description or "?" for item in fashion_items])  # or use item.name if you prefer
+            description = ", ".join([item.category + " : " + item.description or "?" for item in fashion_items])  # or use item.name if you prefer
 
         # Call BaseModel's constructor
         super().__init__(

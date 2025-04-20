@@ -6,6 +6,8 @@ import gc  # For garbage collection
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(SRC_DIR)
 
+from tqdm import tqdm
+
 import torch
 from pathlib import Path
 from collections import defaultdict
@@ -73,13 +75,15 @@ def load_items_by_category(dataset_dir: str, categorized_items: Dict[str, List[s
                           load_image: bool = False, embedding_dict: dict = None, 
                           max_items_per_category: int = 30) -> Dict[str, List[FashionItem]]:
     categorized_data = {}
-    
+    print(f"categorized_items = {len(categorized_items)}")
     # Only process 'tops' and 'bottoms' categories
     for category in ['tops', 'bottoms','shoes']:
         if category in categorized_items:
             items_in_category = []
             # Limit the number of items loaded per category
             limited_item_ids = categorized_items[category][:max_items_per_category]
+
+            print(f"limited_item_ids = {len(limited_item_ids)}")
             
             for item_id in limited_item_ids:
                 item = load_item(dataset_dir, metadata, item_id, load_image, embedding_dict)
@@ -102,12 +106,14 @@ def organize_and_load_data(
         ) -> Dict[str, List[FashionItem]]:
     # Organize items by categories
     categorized_items, metadata = organize_metadata_by_category(dataset_dir)
+    print("items organized by metadata")
     
     # Load items for tops and bottoms categories only
     categorized_data = load_items_by_category(
         dataset_dir, categorized_items, metadata, 
         load_image, embedding_dict, max_items_per_category
     )
+    print("items organized by catogory")
     
     return categorized_data
 
@@ -141,6 +147,7 @@ def generate_outfit_combinations_and_scores(
     # Get top and bottom items
     tops = categorized_data['tops']
     bottoms = categorized_data['bottoms']
+    shoes = categorized_data['shoes']
     
     # Generate combinations of tops and bottoms only
     all_combinations = list(product(tops, bottoms))
@@ -151,7 +158,7 @@ def generate_outfit_combinations_and_scores(
     
     outfits = []
     # For each combination of items, compute the compatibility score
-    for combination in limited_combinations:
+    for combination in tqdm(limited_combinations, desc="Scoring outfits"):
         score, embedding = compute_compatibility_score(list(combination), model)
         outfits.append(Outfit(fashion_items=combination, score=score, embedding=embedding))        
         # Force garbage collection periodically
@@ -175,7 +182,7 @@ if __name__ == '__main__':
 
     # Process with reasonable limits
     max_items_per_category = 100  # Load up to 30 items per category
-    max_combinations = 100      # Limit combinations to test (900 possible with 30x30)
+    max_combinations = 1000      # Limit combinations to test (900 possible with 30x30)
     
     # Organize and load the dataset with limits (tops and bottoms only)
     categorized_data = organize_and_load_data(
@@ -183,14 +190,14 @@ if __name__ == '__main__':
         load_image=True,
         max_items_per_category=max_items_per_category
     )
-    
+
     # Generate top+bottom combinations and compute scores
     outfits = generate_outfit_combinations_and_scores(
         categorized_data, 
         model,
         max_combinations=max_combinations
     )
-    
+
     # Sort by score from highest to lowest
     outfits.sort(key=lambda x: x.score, reverse=True)
 

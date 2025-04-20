@@ -18,7 +18,7 @@ from ..data.datatypes import Outfit
 import random
 
 SRC_DIR = pathlib.Path(__file__).parent.parent.parent.absolute()
-OUTFITS_PATH = SRC_DIR / 'datasets' / 'outfits.json'
+OUTFITS_PATH = SRC_DIR / 'datasets' / 'outfits_v1.json'
 
 LOGS_DIR = SRC_DIR / 'logs'
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -37,6 +37,8 @@ POLYVORE_CATEGORIES = [
 state_my_items = []
 state_candidate_items = []
 
+# global cached outfits to prevent unnecessary preloading of JSON obj.
+cached_outfits = []
 
 def parse_args():
     parser = ArgumentParser()
@@ -83,20 +85,25 @@ def run(args):
 
     with gr.Blocks() as demo:
         state_selected_my_item_index = gr.State(value=None)
+        outfit_display_blocks = []
+        NUM_OUTFITS = 4
 
         with gr.Row(equal_height=True):
-            with gr.Column(scale=8):
-                loaded_outfit_gallery = gr.Gallery(
-                    label="Outfit Items",
-                    allow_preview=False,
-                    columns=[4],
-                    type="pil"
-                )
             with gr.Column(scale=4):
-                loaded_outfit_id = gr.Textbox(label="Outfit ID", interactive=False)
-                loaded_description = gr.Textbox(label="Description", interactive=False)
-                loaded_score = gr.Textbox(label="Score", interactive=False)
                 btn_load_outfits = gr.Button("Load Outfits")
+
+        with gr.Row(equal_height=True):
+            for i in range(NUM_OUTFITS):
+                with gr.Column() as outfit_col:
+                    gallery = gr.Gallery(
+                        columns=[2], #[len(POLYVORE_CATEGORIES)], 
+                        label=f"Outfit {i+1}",
+                        object_fit="contain",
+                        allow_preview=False,
+                        type="pil")
+                    description = gr.Textbox(label="Description", interactive=False)
+                    score = gr.Textbox(label="Score", interactive=False)
+                    outfit_display_blocks.append((gallery, description, score))
         
         with gr.Row(equal_height=True):
             gr.Markdown(
@@ -254,27 +261,30 @@ def run(args):
             }
         
         def load_outfits_json():
+            global cached_outfits
+            
             try:
-                with open(OUTFITS_PATH, "r") as f:
-                    data = json.load(f)
-                random_number = random.randint(0, 19)
-                outfit = Outfit.from_dict(data[random_number])  # show first outfit
-                images = [item.image for item in outfit.fashion_items if item.image]
+                # Load JSON once and cache
+                if not cached_outfits:
+                    with open(OUTFITS_PATH, "r") as f:
+                        data = json.load(f)
+                        cached_outfits = [Outfit.from_dict(d) for d in data]
+                # sample randomly from top 50
+                selected_outfits = random.sample(cached_outfits[:50], NUM_OUTFITS)
 
-                return {
-                    loaded_outfit_gallery: images,
-                    loaded_outfit_id: outfit.outfit_id,
-                    loaded_description: outfit.description,
-                    loaded_score: f"{outfit.score:.2f}"
-                }
+                output_dict = {}
+                for i, (gallery, desc_box, score_box) in enumerate(outfit_display_blocks):
+                    outfit = selected_outfits[i]
+                    images = [item.image for item in outfit.fashion_items if item.image]
+                    output_dict[gallery] = images
+                    output_dict[desc_box] = outfit.description
+                    output_dict[score_box] = f"{outfit.score:.2f}"
+
+                return output_dict
+
             except Exception as e:
                 gr.Warning(f"Failed to load outfits: {str(e)}")
-                return {
-                    loaded_outfit_gallery: [],
-                    loaded_outfit_id: "",
-                    loaded_description: "",
-                    loaded_score: ""
-                }
+                return {}
 
         def select_page_from_polyvore(page):
             global state_candidate_items
@@ -383,7 +393,7 @@ def run(args):
         btn_load_outfits.click(
             load_outfits_json,
             inputs=[],
-            outputs=[loaded_outfit_gallery, loaded_outfit_id, loaded_description, loaded_score]
+            outputs=[comp for group in outfit_display_blocks for comp in group]
         )
 
     # Launch
