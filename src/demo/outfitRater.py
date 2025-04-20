@@ -6,6 +6,11 @@ import gc  # For garbage collection
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(SRC_DIR)
 
+polyvore_dir = SRC_DIR + '/datasets/polyvore'
+model_path = SRC_DIR +  '/compatibility_model/compatibillity_clip_best.pth'
+OUTFITS_PATH = SRC_DIR + '/datasets/outfits_v1.json'
+
+
 from tqdm import tqdm
 
 import torch
@@ -17,14 +22,16 @@ from itertools import product
 from src.data.datasets.polyvore import load_metadata, load_item
 
 from sklearn.cluster import KMeans
-
+import json
 import os
 import pandas as pd
-
+import random
 import numpy as np
 
 # Add the absolute import for loading the model
 from src.models.load import load_model
+
+
 
 def cluster_outfits_and_select_top(outfits: List[Outfit], n_clusters : int = 5):
     # Safely extract and average each outfit's embeddings
@@ -53,8 +60,12 @@ def cluster_outfits_and_select_top(outfits: List[Outfit], n_clusters : int = 5):
     for cluster_id in range(n_clusters):
         cluster_indices = np.where(cluster_labels == cluster_id)[0]
         cluster_entries = [outfits[i] for i in cluster_indices]
-        top_entry = max(cluster_entries, key=lambda x: x.score)
-        cluster_tops.append(top_entry)
+    
+        # top_entry = max(cluster_entries, key=lambda x: x.score)
+    
+        top_5 = sorted(cluster_entries, key=lambda x: x.score, reverse=True)[:5]
+        chosen = random.choice(top_5)
+        cluster_tops.append(chosen)
 
     return cluster_tops
 
@@ -167,22 +178,35 @@ def generate_outfit_combinations_and_scores(
     
     return outfits
 
+def get_top_outfits() -> list[Outfit]:
 
-if __name__ == '__main__':
+    #
+    # Temp load outfits from json file (make shift database)
+    #
+    try:
+        with open(OUTFITS_PATH, "r") as f:
+            data = json.load(f)
+            outfits = [Outfit.from_dict(d) for d in data]
 
-    print("SRC DIR =", SRC_DIR)
-    print("pwd", os.getcwd())
+    except Exception as e:
+        print(f"Failed to load {OUTFITS_PATH}")
+
+    # Sort by score from highest to lowest
+    outfits.sort(key=lambda x: x.score, reverse=True)
+
+    clusterTops = cluster_outfits_and_select_top(outfits=outfits, n_clusters=8)
+
+    return clusterTops
+
+def generate_outfits_and_scores():
     
-    polyvore_dir = SRC_DIR + '/datasets/polyvore'
-    model_path = SRC_DIR +  '/compatibility_model/compatibillity_clip_best.pth'
-    json_path = SRC_DIR + '/datasets/outfits.json'
     # Load the model
     model = load_model(model_type='clip', checkpoint=model_path)
     model.eval()
 
     # Process with reasonable limits
-    max_items_per_category = 100  # Load up to 30 items per category
-    max_combinations = 1000      # Limit combinations to test (900 possible with 30x30)
+    max_items_per_category = 5  # Load up to 30 items per category
+    max_combinations = 200      # Limit combinations to test (900 possible with 30x30)
     
     # Organize and load the dataset with limits (tops and bottoms only)
     categorized_data = organize_and_load_data(
@@ -198,11 +222,6 @@ if __name__ == '__main__':
         max_combinations=max_combinations
     )
 
-    # Sort by score from highest to lowest
-    outfits.sort(key=lambda x: x.score, reverse=True)
-
-    clusterTops = cluster_outfits_and_select_top(outfits)
-
     # Print out the scores for the outfits with detailed item information
     for i, outfit in enumerate(outfits):
         print(f"\n===== Outfit {i+1} (Score: {outfit.score:.4f}) =====")
@@ -211,7 +230,7 @@ if __name__ == '__main__':
         for j, item in enumerate(outfit.fashion_items):
             category = item.category.upper() if item.category else "UNKNOWN"
             description = item.description if item.description else "No description"
-            print(f"  {j+1}. [{category}] {description}")
+            print(f"  {j+1}. [{category}] {description} ")
         
         # Add a visual separator between outfits
         print("-" * 50)
@@ -221,10 +240,15 @@ if __name__ == '__main__':
             break
     
     # Save outfits to a json obj to easy display
-    print(f"Saving generated outfits to a json obj in {json_path}")
+    print(f"Saving generated outfits to a json obj in {OUTFITS_PATH}")
 
     outfit_dicts = [outfit.to_dict() for outfit in outfits]
     df = pd.DataFrame(outfit_dicts)
 
     # Save to JSON
-    df.to_json(json_path, orient='records')
+    df.to_json(OUTFITS_PATH, orient='records')
+
+
+# generate_outfits_and_scores()
+
+# get_top_outfits()

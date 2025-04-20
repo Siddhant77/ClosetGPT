@@ -15,6 +15,9 @@ from ..data import datatypes
 from ..data.datasets import polyvore
 from ..data.datatypes import Outfit
 
+from ..query_openai import re_rank_outfits
+from .outfitRater import get_top_outfits
+
 import random
 
 SRC_DIR = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -29,6 +32,8 @@ POLYVORE_PRECOMPUTED_REC_EMBEDDING_DIR = "{polyvore_dir}/precomputed_rec_embeddi
 ITEM_PER_PAGE = 12
 ITEM_PER_SEARCH = 8
 
+NUM_OUTFITS = 8
+
 POLYVORE_CATEGORIES = [
     'all-body', 'bottoms', 'tops', 'outerwear', 'bags', 
     'shoes', 'accessories', 'scarves', 'hats', 
@@ -39,6 +44,7 @@ state_candidate_items = []
 
 # global cached outfits to prevent unnecessary preloading of JSON obj.
 cached_outfits = []
+selected_outfits = []
 
 def parse_args():
     parser = ArgumentParser()
@@ -86,11 +92,18 @@ def run(args):
     with gr.Blocks() as demo:
         state_selected_my_item_index = gr.State(value=None)
         outfit_display_blocks = []
-        NUM_OUTFITS = 4
 
         with gr.Row(equal_height=True):
-            with gr.Column(scale=4):
+            with gr.Column(scale=2):
+                weather_input = gr.Textbox(label="Weather", placeholder="e.g., sunny, rainy, cold")
+            with gr.Column(scale=2):
+                occasion_input = gr.Textbox(label="Occasion", placeholder="e.g., wedding, casual outing")            
+
+        with gr.Row(equal_height=True):
+            with gr.Column(scale=2):
                 btn_load_outfits = gr.Button("Load Outfits")
+            with gr.Column(scale=2):
+                btn_rerank = gr.Button("Rerank Outfits")
 
         with gr.Row(equal_height=True):
             for i in range(NUM_OUTFITS):
@@ -176,6 +189,7 @@ def run(args):
             gr.Markdown(
                 "## Task"
             )
+            
         with gr.Row(equal_height=True, variant='compact'):
             with gr.Column(scale=1, variant='compact'):
                 with gr.Row(equal_height=True):
@@ -262,6 +276,7 @@ def run(args):
         
         def load_outfits_json():
             global cached_outfits
+            global selected_outfits
             
             try:
                 # Load JSON once and cache
@@ -269,8 +284,11 @@ def run(args):
                     with open(OUTFITS_PATH, "r") as f:
                         data = json.load(f)
                         cached_outfits = [Outfit.from_dict(d) for d in data]
+
                 # sample randomly from top 50
                 selected_outfits = random.sample(cached_outfits[:50], NUM_OUTFITS)
+
+                selected_outfits = get_top_outfits()
 
                 output_dict = {}
                 for i, (gallery, desc_box, score_box) in enumerate(outfit_display_blocks):
@@ -284,6 +302,39 @@ def run(args):
 
             except Exception as e:
                 gr.Warning(f"Failed to load outfits: {str(e)}")
+                return {}
+
+        def rerank_outfits(weather_input = "Rainy", occasion_input= "Work"):
+            try:
+                # Load or reuse cached outfits
+                if not cached_outfits:
+                    with open(OUTFITS_PATH, "r") as f:
+                        data = json.load(f)
+                        cached_outfits[:] = [Outfit.from_dict(d) for d in data]
+
+                if not selected_outfits:
+                    gr.Warning(f"NO SELECTED OUTFITS")
+                    return {}
+
+                weather_input = None if len(weather_input) == 0 else weather_input
+                occasion_input = None if len(occasion_input) == 0 else occasion_input
+                print(weather_input, len(weather_input), occasion_input, len(occasion_input))
+
+                # call re-rank
+                ranked_outfits = re_rank_outfits(selected_outfits, weather=weather_input, occasion=occasion_input)
+
+                output_dict = {}
+                for i, (gallery, desc_box, score_box) in enumerate(outfit_display_blocks):
+                    outfit = ranked_outfits[i]
+                    images = [item.image for item in outfit.fashion_items if item.image]
+                    output_dict[gallery] = images
+                    output_dict[desc_box] = outfit.description
+                    output_dict[score_box] = f"{outfit.score:.2f}"
+
+                return output_dict
+
+            except Exception as e:
+                gr.Warning(f"Failed to rerank outfits: {str(e)}")
                 return {}
 
         def select_page_from_polyvore(page):
@@ -350,7 +401,6 @@ def run(args):
             return {
                 searched_item_gallery: [items.get_item_by_id(r[1]).image for r in res]
             }
-            
         
         # Event Handlers
         my_item_gallery.select(
@@ -393,6 +443,11 @@ def run(args):
         btn_load_outfits.click(
             load_outfits_json,
             inputs=[],
+            outputs=[comp for group in outfit_display_blocks for comp in group]
+        )
+        btn_rerank.click(
+            rerank_outfits,
+            inputs=[weather_input, occasion_input],
             outputs=[comp for group in outfit_display_blocks for comp in group]
         )
 

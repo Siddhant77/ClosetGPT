@@ -60,10 +60,10 @@ outfits = outfits[:8]
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-captions = []
-metadata = []
-for outfit in outfits:
-    captions.append(outfit.description)
+# captions = []
+# metadata = []
+# for i, outfit in enumerate(outfits):
+#     captions.append(f"index: {i} {outfit.description}")
 
 # CLIP embedding wrapper
 class CLIPImageEmbeddings(Embeddings):
@@ -79,23 +79,26 @@ class CLIPImageEmbeddings(Embeddings):
             outputs = clip_model.get_text_features(**inputs)
         return outputs[0].tolist()
 
-clip_embedder = CLIPImageEmbeddings()
-# creating embeddings from captions
-clip_vectors = clip_embedder.embed_documents(captions)
-vector_store = FAISS.from_texts(captions, clip_embedder) #, metadatas=metadata)
-retriever = vector_store.as_retriever()
+# clip_embedder = CLIPImageEmbeddings()
+# # creating embeddings from captions
+# clip_vectors = clip_embedder.embed_documents(captions)
+# vector_store = FAISS.from_texts(captions, clip_embedder) #, metadatas=metadata)
+# retriever = vector_store.as_retriever()
 
 # dev_key = "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"
 
-qa_chain = RetrievalQA.from_chain_type(llm=ChatOpenAI, retriever=retriever)
+# qa_chain = RetrievalQA.from_chain_type(llm=ChatOpenAI(), retriever=retriever)
 
-def get_recommendation(query="What outfit should I wear?"):
+def get_recommendation(qa_chain, query="What outfit should I wear?"):
     # prompt can be changed to add weather/schedule data automatically. Ask for a full outfit. Ask for higher scored items.
     answer = qa_chain.invoke({"query": query})
-    print(answer)
-    return answer
+    print(type(answer['result']), answer)
+    return answer['result']
 
-get_recommendation("interpret this data please.")
+# weather="Rainy"
+# occasion = "Work Meeting"
+# query = f"Rank these outfits in order of their suitability for the weather ({weather}) and occasion ({occasion}). Please return simply the order of their indices."
+
 # client = OpenAI(
 #   api_key=dev_key
 # )
@@ -109,4 +112,57 @@ get_recommendation("interpret this data please.")
 # )
 
 # print(completion.choices[0].message);
+
+for i, outfit in enumerate(outfits):
+    print(i, outfit.description)
+
+def get_rank(result):
+    result = result.split(",")
+    result = [int(r) for r in result]
+    print(result)
+    return result
+
+# ranks = get_rank(query)
+
+# print("Selected outfits = \n")
+# for i, r in enumerate(ranks):
+#     print(i, outfits[r].description)
+
+def build_query(outfits):
+    captions = []
+    for i, outfit in enumerate(outfits):
+        captions.append(f"index {i} : {outfit.description}")
+
+    weather="Rainy"
+    occasion = "Work Meeting"
+    query = f"Rank these outfits in order of their suitability for the weather ({weather}) and occasion ({occasion}). Please return simply the order of their indices."
+
+    return captions, query
+
+
+def re_rank_outfits(outfits: list[Outfit]) -> list[Outfit]:
+
+    captions, query = build_query(outfits)
+
+    clip_embedder = CLIPImageEmbeddings()    
+    # creating embeddings from captions
+    clip_vectors = clip_embedder.embed_documents(captions)
+    vector_store = FAISS.from_texts(captions, clip_embedder) #, metadatas=metadata)
+    retriever = vector_store.as_retriever()
+
+    qa_chain = RetrievalQA.from_chain_type(llm=ChatOpenAI(), retriever=retriever)
+
+    result = get_recommendation(qa_chain, query)
+
+    ranks = get_rank(result)
+    
+    ret = []
+    for r in ranks:
+        ret.append(outfit[r])
+    
+    return ret
+
+re_rank_outfits(outfits)
+
+
 
