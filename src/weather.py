@@ -36,14 +36,16 @@ WEATHER_CODES = {
 }
 
 # Function to get basic weather info for the current day at the given location (default is College Station)
+# If start and end indices are provided, hourly metrics are restricted to that range of hours
 # Returns a dictionary with the following keys
 	# "status": 0 if the API request failed, otherwise 1
-	# "code": qualitative description of the prevalent weather condition for the day
+	# "code": qualitative description of the prevalent weather condition for the day (not super accurate)
 	# "temp_high", "temp_low", "temp_avg": high/low/average hourly temperatures (Fahrenheit)
 	# "feelslike_high", "feelslike_low", "feelslike_avg": high/low/average hourly feels-like temperatures (Fahrenheit)
 	# "precip_chance_max", "precip_chance_min", "precip_chance_avg": max/min/average hourly precipitation chances (percentage)
-	# "precip_total": total precipitation for the day (inches)
-def get_weather(latitude=30.628, longitude=-96.3344, timezone="America/Chicago"):
+	# "precip_total": total precipitation for the given range (inches)
+def get_weather(latitude: float=30.628, longitude: float=-96.3344, timezone: str="America/Chicago", start: int=0, end: int=24):
+	assert(24 >= end > start >= 0)
 	summary = {}
 
 	# Setup the Open-Meteo API client with cache and retry on error
@@ -57,10 +59,8 @@ def get_weather(latitude=30.628, longitude=-96.3344, timezone="America/Chicago")
 	params = {
 		"latitude": latitude,
 		"longitude": longitude,
-		"daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean",
-			"apparent_temperature_max", "apparent_temperature_min", "apparent_temperature_mean",
-			"precipitation_probability_max", "precipitation_probability_min", "precipitation_probability_mean",
-			"precipitation_sum"],
+		"hourly": ["temperature_2m", "apparent_temperature", "precipitation_probability", "precipitation"],
+		"daily": "weather_code",
 		"timezone": timezone,
 		"forecast_days": 1,
 		"temperature_unit": "fahrenheit",
@@ -75,32 +75,29 @@ def get_weather(latitude=30.628, longitude=-96.3344, timezone="America/Chicago")
 		summary["status"] = 0
 		return summary
 
+	# Process hourly data for the range start:end. The order of variables needs to be the same as requested.
+	hourly = response.Hourly()
+	hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()[start:end]
+	hourly_apparent_temperature = hourly.Variables(1).ValuesAsNumpy()[start:end]
+	hourly_precipitation_probability = hourly.Variables(2).ValuesAsNumpy()[start:end]
+	hourly_precipitation = hourly.Variables(3).ValuesAsNumpy()[start:end]
+
 	# Process daily data. The order of variables needs to be the same as requested.
 	daily = response.Daily()
 	daily_weather_code = daily.Variables(0).ValuesAsNumpy()
-	daily_temperature_2m_max = daily.Variables(1).ValuesAsNumpy()
-	daily_temperature_2m_min = daily.Variables(2).ValuesAsNumpy()
-	daily_temperature_2m_mean = daily.Variables(3).ValuesAsNumpy()
-	daily_apparent_temperature_max = daily.Variables(4).ValuesAsNumpy()
-	daily_apparent_temperature_min = daily.Variables(5).ValuesAsNumpy()
-	daily_apparent_temperature_mean = daily.Variables(6).ValuesAsNumpy()
-	daily_precipitation_probability_max = daily.Variables(7).ValuesAsNumpy()
-	daily_precipitation_probability_min = daily.Variables(8).ValuesAsNumpy()
-	daily_precipitation_probability_mean = daily.Variables(9).ValuesAsNumpy()
-	daily_precipitation_sum = daily.Variables(10).ValuesAsNumpy()
 
 	# Extract key metrics
 	summary["code"] = WEATHER_CODES[daily_weather_code[0]]
-	summary["temp_high"] = daily_temperature_2m_max[0]
-	summary["temp_low"] = daily_temperature_2m_min[0]
-	summary["temp_avg"] = daily_temperature_2m_mean[0]
-	summary["feelslike_high"] = daily_apparent_temperature_max[0]
-	summary["feelslike_low"] = daily_apparent_temperature_min[0]
-	summary["feelslike_avg"] = daily_apparent_temperature_mean[0]
-	summary["precip_chance_max"] = daily_precipitation_probability_max[0]
-	summary["precip_chance_min"] = daily_precipitation_probability_min[0]
-	summary["precip_chance_avg"] = daily_precipitation_probability_mean[0]
-	summary["precip_total"] = daily_precipitation_sum[0]
+	summary["temp_high"] = max(hourly_temperature_2m)
+	summary["temp_low"] = min(hourly_temperature_2m)
+	summary["temp_avg"] = sum(hourly_temperature_2m) / len(hourly_temperature_2m)
+	summary["feelslike_high"] = max(hourly_apparent_temperature)
+	summary["feelslike_low"] = min(hourly_apparent_temperature)
+	summary["feelslike_avg"] = sum(hourly_apparent_temperature) / len(hourly_apparent_temperature)
+	summary["precip_chance_max"] = max(hourly_precipitation_probability)
+	summary["precip_chance_min"] = min(hourly_precipitation_probability)
+	summary["precip_chance_avg"] = sum(hourly_precipitation_probability) / len(hourly_precipitation_probability)
+	summary["precip_total"] = sum(hourly_precipitation)
 
 	summary["status"] = 1
 	print(summary)
