@@ -6,5 +6,6 @@ Evaluation3.zip
 complementry_model/
 compatibility_model/
 precomputed_embeddings/
+datasets/polyvore
+datasets/outfit_v1.json
 datasets/
-
