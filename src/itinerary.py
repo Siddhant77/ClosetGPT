@@ -2,7 +2,7 @@ from icalendar import Calendar, IncompleteComponent
 import recurring_ical_events
 from pathlib import Path
 import datetime
-import weather
+from weather import get_weather
 
 # Function to extract itinerary from an iCalendar file (located at ics_path) for the given date
 # Returns a list of events (sorted by start time), represented as dictionaries with the following keys
@@ -55,8 +55,10 @@ def get_itinerary(ics_path: str, date: datetime.date):
 def get_itinerary_and_weather(ics_path: str, latitude: float=30.628, longitude: float=-96.3344, timezone: str="America/Chicago"):
     itin = get_itinerary(ics_path=ics_path, date=datetime.date.today())
     if len(itin) == 0:
-        return {"weather": weather.get_weather(latitude=latitude, longitude=longitude, timezone=timezone),
-                "itinerary": []}
+        return {
+            "weather": get_weather(latitude, longitude, timezone),
+            "itinerary": []
+        }
     
     itin_names = [event["name"] for event in itin]
     itin_start = min([event["dtstart"] for event in itin])
@@ -68,5 +70,41 @@ def get_itinerary_and_weather(ics_path: str, latitude: float=30.628, longitude: 
     if itin_end.date() > itin_start.date():
         end_hour = 23
 
-    return {"weather": weather.get_weather(latitude=latitude, longitude=longitude, timezone=timezone, start=start_hour, end=end_hour+1),
-            "itinerary": itin_names}
+    return {
+        "weather": get_weather(latitude, longitude, timezone, start=start_hour, end=end_hour+1),
+        "itinerary": itin_names
+    }
+
+# Function to get next event in itinerary (from provided .ics path) and corresponding weather info at the given location (default is College Station)
+# Next is relative to the current time by default, but can be adjusted via the time argument (should be a timezone-aware datetime object)
+# Returns a dictionary with the following keys
+#   "weather": string summarizing weather conditions and temperature
+#   "occasion": string containing the name of the event
+def get_next_event_and_weather(ics_path: str, time: datetime.datetime=datetime.datetime.now(datetime.timezone.utc),
+                               latitude: float=30.628, longitude: float=-96.3344, timezone: str="America/Chicago"):
+    itin = get_itinerary(ics_path, datetime.date.today())
+    if len(itin) == 0:
+        weather = get_weather(latitude, longitude, timezone)
+        return {
+            "weather": weather["daily_code"] + ", with a temperature of " + str(weather["feelslike_avg"]),
+            "occasion": ""
+        }
+    
+    # Find next event, or take the last one if all have already passed
+    i = 0
+    while(i < len(itin) - 1 and itin[i]["dtstart"] < time):
+        i += 1
+    
+    next_event = itin[i]
+    start_hour = next_event["dtstart"].hour
+    end_hour = next_event["dtend"].hour     # inclusive
+
+    # Just in case event extends to next day
+    if next_event["dtend"].date() > next_event["dtstart"].date():
+        end_hour = 23
+
+    weather = get_weather(latitude, longitude, timezone, start=start_hour, end=end_hour+1)
+    return {
+        "weather": weather["hourly_code_at_start"] + ", with a temperature of " + str(weather["feelslike_avg"]),
+        "occasion": next_event["name"]
+    }

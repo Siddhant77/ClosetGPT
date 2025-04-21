@@ -5,8 +5,8 @@ import requests_cache
 from retry_requests import retry
 
 WEATHER_CODES = {
-	0: "clear",
-	1: "mostly clear",
+	0: "clear skies",
+	1: "mostly clear skies",
 	2: "partly cloudy",
 	3: "overcast",
 	45: "foggy",
@@ -30,20 +30,21 @@ WEATHER_CODES = {
 	82: "violent rain showers",
 	85: "slight snow showers",
 	86: "heavy snow showers",
-	95: "thunderstorm",
-	96: "thunderstorm with slight hail",
-	99: "thunderstorm with heavy hail"
+	95: "thunderstorms",
+	96: "thunderstorms and slight hail",
+	99: "thunderstorms and heavy hail"
 }
 
 # Function to get basic weather info for the current day at the given location (default is College Station)
 # If start and end indices are provided, hourly metrics are restricted to that range of hours
 # Returns a dictionary with the following keys
-	# "status": 0 if the API request failed, otherwise 1
-	# "code": qualitative description of the prevalent weather condition for the day (not super accurate)
-	# "temp_high", "temp_low", "temp_avg": high/low/average hourly temperatures (Fahrenheit)
-	# "feelslike_high", "feelslike_low", "feelslike_avg": high/low/average hourly feels-like temperatures (Fahrenheit)
-	# "precip_chance_max", "precip_chance_min", "precip_chance_avg": max/min/average hourly precipitation chances (percentage)
-	# "precip_total": total precipitation for the given range (inches)
+#	"status": 0 if the API request failed, otherwise 1
+#	"daily_code": qualitative description of the prevalent weather condition for the day (not super accurate)
+#	"hourly_code_at_start": qualitative description of the weather at the start of the given range
+#	"temp_high", "temp_low", "temp_avg": high/low/average hourly temperatures (Fahrenheit)
+#	"feelslike_high", "feelslike_low", "feelslike_avg": high/low/average hourly feels-like temperatures (Fahrenheit)
+#	"precip_chance_max", "precip_chance_min", "precip_chance_avg": max/min/average hourly precipitation chances (percentage)
+#	"precip_total": total precipitation for the given range (inches)
 def get_weather(latitude: float=30.628, longitude: float=-96.3344, timezone: str="America/Chicago", start: int=0, end: int=24):
 	assert(24 >= end > start >= 0)
 	summary = {}
@@ -59,7 +60,7 @@ def get_weather(latitude: float=30.628, longitude: float=-96.3344, timezone: str
 	params = {
 		"latitude": latitude,
 		"longitude": longitude,
-		"hourly": ["temperature_2m", "apparent_temperature", "precipitation_probability", "precipitation"],
+		"hourly": ["temperature_2m", "apparent_temperature", "precipitation_probability", "precipitation", "weather_code"],
 		"daily": "weather_code",
 		"timezone": timezone,
 		"forecast_days": 1,
@@ -81,13 +82,15 @@ def get_weather(latitude: float=30.628, longitude: float=-96.3344, timezone: str
 	hourly_apparent_temperature = hourly.Variables(1).ValuesAsNumpy()[start:end]
 	hourly_precipitation_probability = hourly.Variables(2).ValuesAsNumpy()[start:end]
 	hourly_precipitation = hourly.Variables(3).ValuesAsNumpy()[start:end]
+	hourly_weather_code = hourly.Variables(4).ValuesAsNumpy()[start:end]
 
 	# Process daily data. The order of variables needs to be the same as requested.
 	daily = response.Daily()
 	daily_weather_code = daily.Variables(0).ValuesAsNumpy()
 
 	# Extract key metrics
-	summary["code"] = WEATHER_CODES[daily_weather_code[0]]
+	summary["daily_code"] = WEATHER_CODES[daily_weather_code[0]]
+	summary["hourly_code_at_start"] = WEATHER_CODES[hourly_weather_code[0]]
 	summary["temp_high"] = max(hourly_temperature_2m)
 	summary["temp_low"] = min(hourly_temperature_2m)
 	summary["temp_avg"] = sum(hourly_temperature_2m) / len(hourly_temperature_2m)
@@ -100,5 +103,4 @@ def get_weather(latitude: float=30.628, longitude: float=-96.3344, timezone: str
 	summary["precip_total"] = sum(hourly_precipitation)
 
 	summary["status"] = 1
-	print(summary)
 	return summary
