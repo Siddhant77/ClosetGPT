@@ -95,9 +95,9 @@ def run(args):
 
         with gr.Row(equal_height=True):
             with gr.Column(scale=2):
-                weather_input = gr.Textbox(label="Weather", placeholder="e.g., sunny, rainy, cold")
+                weather_input = gr.Textbox(label="Weather", placeholder="e.g., sunny, rainy, cold", value="Sunny")
             with gr.Column(scale=2):
-                occasion_input = gr.Textbox(label="Occasion", placeholder="e.g., wedding, casual outing")            
+                occasion_input = gr.Textbox(label="Occasion", placeholder="e.g., wedding, casual outing", value="Computer Science Class")            
 
         with gr.Row(equal_height=True):
             with gr.Column(scale=2):
