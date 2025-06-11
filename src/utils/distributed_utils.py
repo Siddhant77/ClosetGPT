@@ -25,7 +25,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def setup(
     rank: int, world_size: int
 ):
-    os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+    # For MPS (Apple Silicon), we don't need to set CUDA_DEVICE_ORDER
+    if not torch.backends.mps.is_available():
+        os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+    
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
 

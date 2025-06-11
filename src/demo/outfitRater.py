@@ -7,7 +7,7 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(SRC_DIR)
 
 polyvore_dir = SRC_DIR + '/datasets/polyvore'
-model_path = SRC_DIR +  '/compatibility_model/compatibillity_clip_best.pth'
+model_path = SRC_DIR +  '/checkpoints/compatibility_clip_best.pth'
 OUTFITS_PATH = SRC_DIR + '/datasets/outfits_v1.json'
 
 
@@ -34,6 +34,7 @@ from src.models.load import load_model
 
 
 def cluster_outfits_and_select_top(outfits: List[Outfit], n_clusters : int = 5):
+    print(f"Clustering {len(outfits)} outfits into {n_clusters} clusters.")
     # Safely extract and average each outfit's embeddings
     embeddings = []
     for outfit in outfits:
@@ -54,11 +55,15 @@ def cluster_outfits_and_select_top(outfits: List[Outfit], n_clusters : int = 5):
     # Cluster with KMeans
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
     cluster_labels = kmeans.fit_predict(embeddings)
+    print("Finished KMeans clustering.")
 
     # Group outfits by cluster and select top scoring one from each
     cluster_tops = []
     for cluster_id in range(n_clusters):
         cluster_indices = np.where(cluster_labels == cluster_id)[0]
+        if len(cluster_indices) == 0:
+            print(f"Warning: Cluster {cluster_id} has no outfits.")
+            continue
         cluster_entries = [outfits[i] for i in cluster_indices]
     
         # top_entry = max(cluster_entries, key=lambda x: x.score)
@@ -66,6 +71,7 @@ def cluster_outfits_and_select_top(outfits: List[Outfit], n_clusters : int = 5):
         top_5 = sorted(cluster_entries, key=lambda x: x.score, reverse=True)[:5]
         chosen = random.choice(top_5)
         cluster_tops.append(chosen)
+        print(f"Selected outfit from cluster {cluster_id} with score {chosen.score:.4f}")
 
     return cluster_tops
 
@@ -86,7 +92,7 @@ def load_items_by_category(dataset_dir: str, categorized_items: Dict[str, List[s
                           load_image: bool = False, embedding_dict: dict = None, 
                           max_items_per_category: int = 30) -> Dict[str, List[FashionItem]]:
     categorized_data = {}
-    print(f"categorized_items = {len(categorized_items)}")
+    print(f"Categorized items: {len(categorized_items)}")
     # Only process 'tops' and 'bottoms' categories
     for category in ['tops', 'bottoms','shoes']:
         if category in categorized_items:
@@ -94,7 +100,7 @@ def load_items_by_category(dataset_dir: str, categorized_items: Dict[str, List[s
             # Limit the number of items loaded per category
             limited_item_ids = categorized_items[category][:max_items_per_category]
 
-            print(f"limited_item_ids = {len(limited_item_ids)}")
+            print(f"Loading {len(limited_item_ids)} items for category '{category}'")
             
             for item_id in limited_item_ids:
                 item = load_item(dataset_dir, metadata, item_id, load_image, embedding_dict)
@@ -116,15 +122,17 @@ def organize_and_load_data(
         max_items_per_category: int = 30
         ) -> Dict[str, List[FashionItem]]:
     # Organize items by categories
+    print("Organizing metadata by category...")
     categorized_items, metadata = organize_metadata_by_category(dataset_dir)
-    print("items organized by metadata")
+    print("Items organized by metadata.")
     
     # Load items for tops and bottoms categories only
+    print("Loading items by category...")
     categorized_data = load_items_by_category(
         dataset_dir, categorized_items, metadata, 
         load_image, embedding_dict, max_items_per_category
     )
-    print("items organized by catogory")
+    print("Items loaded by category.")
     
     return categorized_data
 
@@ -158,7 +166,7 @@ def generate_outfit_combinations_and_scores(
     # Get top and bottom items
     tops = categorized_data['tops']
     bottoms = categorized_data['bottoms']
-    shoes = categorized_data['shoes']
+    shoes = categorized_data.get('shoes', [])
     
     # Generate combinations of tops and bottoms only
     all_combinations = list(product(tops, bottoms))
@@ -176,54 +184,57 @@ def generate_outfit_combinations_and_scores(
         if len(outfits) % 10 == 0:
             gc.collect()
     
+    print(f"Scored {len(outfits)} outfits.")
     return outfits
 
-def get_top_outfits() -> list[Outfit]:
-
-    #
-    # Temp load outfits from json file (make shift database)
-    #
-    try:
-        with open(OUTFITS_PATH, "r") as f:
-            data = json.load(f)
-            outfits = [Outfit.from_dict(d) for d in data]
-
-    except Exception as e:
-        print(f"Failed to load {OUTFITS_PATH}")
-
+def get_top_outfits(outfits: list[Outfit]) -> list[Outfit]:
     # Sort by score from highest to lowest
+    print("Sorting outfits by score...")
     outfits.sort(key=lambda x: x.score, reverse=True)
 
+    print("Clustering outfits to select top ones...")
     clusterTops = cluster_outfits_and_select_top(outfits=outfits, n_clusters=8)
+    print(f"Selected {len(clusterTops)} top outfits from clusters.")
 
     return clusterTops
 
 def generate_outfits_and_scores():
     
+    print("--- Starting Outfit Generation and Scoring ---")
     # Load the model
+    print("Loading model...")
     model = load_model(model_type='clip', checkpoint=model_path)
     model.eval()
+    print("Model loaded.")
 
     # Process with reasonable limits
-    max_items_per_category = 5  # Load up to 30 items per category
-    max_combinations = 200      # Limit combinations to test (900 possible with 30x30)
+    max_items_per_category = 5
+    max_combinations = 200
+    print(f"Max items per category: {max_items_per_category}, Max combinations: {max_combinations}")
     
     # Organize and load the dataset with limits (tops and bottoms only)
+    print("Organizing and loading data...")
     categorized_data = organize_and_load_data(
         polyvore_dir, 
         load_image=True,
         max_items_per_category=max_items_per_category
     )
+    print("Data organized and loaded.")
 
     # Generate top+bottom combinations and compute scores
+    print("Generating and scoring outfit combinations...")
     outfits = generate_outfit_combinations_and_scores(
         categorized_data, 
         model,
         max_combinations=max_combinations
     )
+    print("Finished generating and scoring outfits.")
 
     # Print out the scores for the outfits with detailed item information
+    print("\n--- Top 20 Generated Outfits ---")
     for i, outfit in enumerate(outfits):
+        if i >= 20:
+            break
         print(f"\n===== Outfit {i+1} (Score: {outfit.score:.4f}) =====")
         
         # Print details for each item in the outfit
@@ -234,21 +245,9 @@ def generate_outfits_and_scores():
         
         # Add a visual separator between outfits
         print("-" * 50)
-        
-        # Only show top 20 outfits
-        if i >= 19:
-            break
     
-    # Save outfits to a json obj to easy display
-    print(f"Saving generated outfits to a json obj in {OUTFITS_PATH}")
+    # No longer saving to file, returning directly
+    print("--- Outfit Generation and Scoring Complete ---")
+    return outfits
 
-    outfit_dicts = [outfit.to_dict() for outfit in outfits]
-    df = pd.DataFrame(outfit_dicts)
-
-    # Save to JSON
-    df.to_json(OUTFITS_PATH, orient='records')
-
-
-# generate_outfits_and_scores()
-
-# get_top_outfits()
+generate_outfits_and_scores()

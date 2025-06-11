@@ -10,13 +10,9 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
 from torch.amp import GradScaler, autocast
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
 import wandb
@@ -25,7 +21,6 @@ from . import vectorstore
 from ..data import collate_fn
 from ..data.datasets import polyvore
 from ..models.load import load_model
-from ..utils.distributed_utils import cleanup, setup
 from ..utils.logger import get_logger
 from ..utils.utils import seed_everything
 
@@ -41,6 +36,8 @@ def parse_args():
     parser = ArgumentParser()
     parser.add_argument('--polyvore_dir', type=str, 
                         default='./datasets/polyvore')
+    parser.add_argument('--device', type=str, 
+                        default='auto', choices=['auto', 'mps', 'cuda', 'cpu'])
     
     return parser.parse_args()
 
@@ -68,6 +65,19 @@ def load_rec_embedding_dict(dataset_dir):
 
 
 def main(args):
+    # Set device
+    if args.device == 'auto':
+        if torch.backends.mps.is_available():
+            device = torch.device('mps')
+        elif torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+    else:
+        device = torch.device(args.device)
+    
+    print(f'Using device: {device}')
+    
     indexer = vectorstore.FAISSVectorStore(
         index_name='rec_index',
         d_embed=128,

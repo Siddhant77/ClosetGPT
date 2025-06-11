@@ -12,18 +12,37 @@ from torch.distributed import get_rank, get_world_size
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-def load_model(model_type, checkpoint=None, device=torch.device("cpu"), **cfg_kwargs):
+def load_model(model_type, checkpoint=None, device=None, **cfg_kwargs):
     is_distributed = torch.distributed.is_initialized()
+
+    # Set device if not provided
+    if device is None:
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+        elif torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
 
     # 분산 학습 환경 설정
     if is_distributed:
         rank = get_rank()
         world_size = get_world_size()
-        map_location = f'cuda:{rank}' if torch.cuda.is_available() else 'cpu'
+        if torch.backends.mps.is_available():
+            map_location = 'mps'
+        elif torch.cuda.is_available():
+            map_location = f'cuda:{rank}'
+        else:
+            map_location = 'cpu'
     else:
         rank = 0
         world_size = 1
-        map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if torch.backends.mps.is_available():
+            map_location = 'mps'
+        elif torch.cuda.is_available():
+            map_location = 'cuda'
+        else:
+            map_location = 'cpu'
     
     # 체크포인트 로드
     state_dict = None
@@ -60,7 +79,8 @@ def load_model(model_type, checkpoint=None, device=torch.device("cpu"), **cfg_kw
         print(f"Loaded model from checkpoint: {checkpoint}")
     
     # DDP 적용 (가중치 로드 후 래핑)
-    if world_size > 1:
+    # MPS doesn't support DDP, so only apply if using CUDA
+    if world_size > 1 and torch.cuda.is_available():
         model = DDP(model, device_ids=[rank], static_graph=True)
     
     return model

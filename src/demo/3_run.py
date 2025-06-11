@@ -16,7 +16,7 @@ from ..data.datasets import polyvore
 from ..data.datatypes import Outfit
 
 from ..query_openai import re_rank_outfits
-from .outfitRater import get_top_outfits
+from .outfitRater import get_top_outfits, generate_outfits_and_scores
 
 import random
 
@@ -275,20 +275,14 @@ def run(args):
             }
         
         def load_outfits_json():
-            global cached_outfits
             global selected_outfits
             
             try:
-                # Load JSON once and cache
-                if not cached_outfits:
-                    with open(OUTFITS_PATH, "r") as f:
-                        data = json.load(f)
-                        cached_outfits = [Outfit.from_dict(d) for d in data]
-
-                # sample randomly from top 50
-                selected_outfits = random.sample(cached_outfits[:50], NUM_OUTFITS)
-
-                selected_outfits = get_top_outfits()
+                # Generate and score outfits
+                generated_outfits = generate_outfits_and_scores()
+                
+                # Get top outfits
+                selected_outfits = get_top_outfits(generated_outfits)
 
                 output_dict = {}
                 for i, (gallery, desc_box, score_box) in enumerate(outfit_display_blocks):
@@ -306,12 +300,6 @@ def run(args):
 
         def rerank_outfits(weather_input = "Rainy", occasion_input= "Work"):
             try:
-                # Load or reuse cached outfits
-                if not cached_outfits:
-                    with open(OUTFITS_PATH, "r") as f:
-                        data = json.load(f)
-                        cached_outfits[:] = [Outfit.from_dict(d) for d in data]
-
                 if not selected_outfits:
                     gr.Warning(f"NO SELECTED OUTFITS")
                     return {}

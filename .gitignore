@@ -9,3 +9,6 @@ precomputed_embeddings/
 datasets/polyvore
 datasets/outfit_v1.json
 datasets/
+*.pyc
+checkpoints/
+logs/

@@ -14,7 +14,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
@@ -44,55 +44,55 @@ def parse_args():
                         default='./datasets/polyvore')
     parser.add_argument('--polyvore_type', type=str, choices=['nondisjoint', 'disjoint'],
                         default='nondisjoint')
-    parser.add_argument('--batch_sz_per_gpu', type=int,
+    parser.add_argument('--batch_sz', type=int,
                         default=128)
-    parser.add_argument('--n_workers_per_gpu', type=int,
+    parser.add_argument('--n_workers', type=int,
                         default=4)
     parser.add_argument('--checkpoint', type=str, 
                         default=None)
     parser.add_argument('--world_size', type=int, 
-                        default=-1)
+                        default=1)
     parser.add_argument('--demo', action='store_true')
+    parser.add_argument('--device', type=str, 
+                        default='auto', choices=['auto', 'mps', 'cuda', 'cpu'])
     
     return parser.parse_args()
 
 
-def setup_dataloaders(rank, args):
-
-    print("args = ", args)
+def setup_dataloader(args):
     item_dataset = polyvore.PolyvoreItemDataset(
         dataset_dir=args.polyvore_dir, load_image=True
     )
-
-    n_items = len(item_dataset)
-    n_items_per_gpu = n_items // args.world_size
-
-    start_idx = n_items_per_gpu * rank
-    end_idx = (start_idx + n_items_per_gpu) if rank < args.world_size - 1 else n_items
-    item_dataset = torch.utils.data.Subset(item_dataset, range(start_idx, end_idx))
     
-    item_dataloader = DataLoader(
-        dataset=item_dataset, batch_size=args.batch_sz_per_gpu, shuffle=False,
-        num_workers=args.n_workers_per_gpu, collate_fn=collate_fn.item_collate_fn
+    item_dataloader = torch.utils.data.DataLoader(
+        dataset=item_dataset, batch_size=args.batch_sz, shuffle=False,
+        num_workers=args.n_workers, collate_fn=collate_fn.item_collate_fn
     )
 
     return item_dataloader
 
 
-def compute(rank: int, world_size: int, device: torch.device, args: Any):
+def compute(args: Any):
+    # Set device
+    if args.device == 'auto':
+        if torch.backends.mps.is_available():
+            device = torch.device('mps')
+        elif torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+    else:
+        device = torch.device(args.device)
     
-    # Setup
-    setup(rank, world_size)
-
     # Logging Setup
-    logger = get_logger('precompute_clip_embedding', LOGS_DIR, rank)
+    logger = get_logger('precompute_clip_embedding', LOGS_DIR)
     logger.info(f'Logger Setup Completed')
-
+    logger.info(f'Using device: {device}')
     logger.info(args)
 
     # Dataloaders
-    item_dataloader = setup_dataloaders(rank, args)
-    logger.info(f'Dataloaders Setup Completed')
+    item_dataloader = setup_dataloader(args)
+    logger.info(f'Dataloader Setup Completed')
     
     # Model setting
     model = load_model(model_type=args.model_type, checkpoint=args.checkpoint, device=device)
@@ -105,10 +105,15 @@ def compute(rank: int, world_size: int, device: torch.device, args: Any):
             if args.demo and len(all_embeddings) > 10:
                 break
             
-            if dist.get_world_size() > 1:
-                embeddings = model.module.precompute_clip_embedding(batch)  # (batch_size, d_embed)
-            else:
-                embeddings = model.precompute_clip_embedding(batch)
+            # Move batch data to device if needed
+            if hasattr(batch, 'to'):
+                batch = batch.to(device)
+            elif isinstance(batch, list):
+                for i, item in enumerate(batch):
+                    if hasattr(item, 'to'):
+                        batch[i] = item.to(device)
+            
+            embeddings = model.precompute_clip_embedding(batch)
             
             all_ids.extend([item.item_id for item in batch])
             all_embeddings.append(embeddings)
@@ -116,31 +121,16 @@ def compute(rank: int, world_size: int, device: torch.device, args: Any):
     all_embeddings = np.concatenate(all_embeddings, axis=0)
     logger.info(f"Computed {len(all_embeddings)} embeddings")
 
-    # numpy 어레이 저장
+    # Save numpy array
     save_dir = POLYVORE_PRECOMPUTED_CLIP_EMBEDDING_DIR.format(polyvore_dir=args.polyvore_dir)
     os.makedirs(save_dir, exist_ok=True)
-    save_path = f"{save_dir}/polyvore_{rank}.pkl"
+    save_path = f"{save_dir}/polyvore_0.pkl"
     with open(save_path, 'wb') as f:
         pickle.dump({'ids': all_ids, 'embeddings': all_embeddings}, f)
     
-    # DDP 종료
-    cleanup()
+    logger.info(f"Saved embeddings to {save_path}")
 
 
 if __name__ == '__main__':
     args = parse_args()
-
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(device)
-    if device.type == "cpu":
-        args.world_size = 1
-    else:  
-        args.world_size = torch.cuda.device_count()
-    
-    print("args.world_size = ", args.world_size)
-            
-    compute(rank=0, world_size=1, device=device, args=args)
-    # mp.spawn(
-    #     compute, args=(args.world_size, args), 
-    #     nprocs=args.world_size, join=True
-    # )
+    compute(args)
